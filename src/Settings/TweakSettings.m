@@ -150,6 +150,8 @@
                                                 [SCISetting switchCellWithTitle:@"Disable view-once limitations" subtitle:@"Makes view-once messages behave like normal visual messages (loopable/pauseable)" defaultsKey:@"disable_view_once_limitations"],
                                                 [SCISetting switchCellWithTitle:@"Disable screenshot detection" subtitle:@"Removes the screenshot-prevention features for visual messages in DMs" defaultsKey:@"remove_screenshot_alert"],
                                                 [SCISetting switchCellWithTitle:@"Disable story seen receipt" subtitle:@"Hides the notification for others when you view their story" defaultsKey:@"no_seen_receipt"],
+                                                [SCISetting switchCellWithTitle:@"Keep stories visually unseen" subtitle:@"Prevents stories from visually marking as seen in the tray (keeps colorful ring)" defaultsKey:@"no_seen_visual"],
+                                                [SCISetting switchCellWithTitle:@"Stop story auto-advance" subtitle:@"Stories won't auto-skip to the next one when the timer ends. Tap to advance manually" defaultsKey:@"stop_story_auto_advance"],
                                                 [SCISetting switchCellWithTitle:@"Disable instants creation" subtitle:@"Hides the functionality to create/send instants" defaultsKey:@"disable_instants_creation" requiresRestart:YES]
                                             ]
                                         }]
@@ -282,9 +284,10 @@
             @"header": @"Credits",
             @"rows": @[
                 [SCISetting linkCellWithTitle:@"Developer" subtitle:@"SoCuul" imageUrl:@"https://i.imgur.com/c9CbytZ.png" url:@"https://socuul.dev"],
+                [SCISetting linkCellWithTitle:@"Modded by" subtitle:@"Ryuk" imageUrl:@"https://github.com/faroukbmiled.png" url:@"https://github.com/faroukbmiled"],
                 [SCISetting linkCellWithTitle:@"View Repo" subtitle:@"View the tweak's source code on GitHub" imageUrl:@"https://i.imgur.com/BBUNzeP.png" url:@"https://github.com/SoCuul/SCInsta"]
             ],
-            @"footer": [NSString stringWithFormat:@"SCInsta %@\n\nInstagram v%@", SCIVersionString, [SCIUtils IGVersionString]]
+            @"footer": [NSString stringWithFormat:@"SCInsta %@\n\nInstagram v%@\n\nModded by Ryuk", SCIVersionString, [SCIUtils IGVersionString]]
         }
     ];
 }

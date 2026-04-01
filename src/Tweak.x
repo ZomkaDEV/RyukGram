@@ -13,7 +13,7 @@
 ///////////////////////////////////////////////////////////
 
 // * Tweak version *
-NSString *SCIVersionString = @"v1.1.2";
+NSString *SCIVersionString = @"v1.1.3";
 
 // Variables that work across features
 BOOL dmVisualMsgsViewedButtonEnabled = false;
@@ -44,7 +44,8 @@ BOOL dmVisualMsgsViewedButtonEnabled = false;
         @"enable_notes_customization": @(YES),
         @"custom_note_themes": @(YES),
         @"disable_auto_unmuting_reels": @(YES),
-        @"doom_scrolling_reel_count": @(1)
+        @"doom_scrolling_reel_count": @(1),
+        @"no_seen_visual": @(YES)
     };
     [[NSUserDefaults standardUserDefaults] registerDefaults:sciDefaults];
     

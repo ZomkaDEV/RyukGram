@@ -145,9 +145,9 @@
         [weakSelf.downloadManager cancelDownload];
     };
 
-    UIViewController *topVC = topMostController();
-    UIView *hostView = topVC.view;
-    if (!hostView) hostView = [UIApplication sharedApplication].keyWindow;
+    // Show on keyWindow so it survives VC transitions (e.g. leaving stories)
+    UIView *hostView = [UIApplication sharedApplication].keyWindow;
+    if (!hostView) hostView = topMostController().view;
     if (!hostView) {
         NSLog(@"[SCInsta] Download: No valid view");
         return;
