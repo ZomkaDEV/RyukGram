@@ -141,6 +141,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 
 ## Known Issues
 - Preserved unsent messages cannot be removed using "Delete for you". Pull to refresh in the DMs tab clears all preserved messages (with optional confirmation if "Warn before clearing on refresh" is enabled).
+- "Delete for you" detection uses a ~2 second window after the local action. If a real other-party unsend happens to land in the same window, it may not be preserved. Rare in practice and limited to that specific overlap.
 
 # Opening Tweak Settings
 

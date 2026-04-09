@@ -107,18 +107,23 @@ jobs:
               if: steps.check_release.outputs.should_release == 'true'
               id: notes
               run: |
-                BODY=$(git log -1 --pretty=%b)
+                PENDING_FILE="PENDING_CHANGES.md"
+                PREV_TAG=$(git tag --sort=-creatordate | grep -v "v${VERSION}$" | head -n1 || true)
 
                 {
                   echo "## Changelog"
                   echo ""
-                  if [ -n "$BODY" ]; then
-                    echo '```'
-                    echo "$BODY"
-                    echo '```'
+                  if [ -f "$PENDING_FILE" ]; then
+                    # Drop the copy-as-commit header lines (HTML comment + [release] token)
+                    # so they don't appear in the published release body.
+                    sed -e '/^<!--/,/-->$/d' -e '/^\[release\]/d' "$PENDING_FILE"
                   fi
                   echo ""
-                  echo "**[All commits](https://github.com/${{ github.repository }}/commits/main)**"
+                  if [ -n "$PREV_TAG" ]; then
+                    echo "**Full changelog:** [\`${PREV_TAG}\`...\`v${VERSION}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${VERSION})"
+                  else
+                    echo "**[All commits](https://github.com/${{ github.repository }}/commits/main)**"
+                  fi
                 } > /tmp/release_notes.md
 
             - name: Create Release

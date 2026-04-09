@@ -40,4 +40,5 @@ upstream-scinsta
 *.dylib
 deploy.sh
 PENDING_CHANGES.md
+PENDING_CHANGES.md.bk
 wrapper/
