@@ -121,6 +121,7 @@
 // Open settings and push straight into a named top-level entry (e.g. "Messages").
 + (void)showSettingsVC:(UIWindow *)window atTopLevelEntry:(NSString *)entryTitle {
     UIViewController *rootController = [window rootViewController];
+    while (rootController.presentedViewController) rootController = rootController.presentedViewController;
     SCISettingsViewController *root = [SCISettingsViewController new];
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:root];
 

@@ -98,7 +98,9 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Disable screenshot detection
 - Disable story seen receipt (blocks network upload, toggleable at runtime without restart) **\***
 - Keep stories visually unseen — keeps the colorful ring in the tray after viewing **\***
-- Manual mark story as seen — button on story overlay to selectively mark stories as seen **\***
+- Manual mark story as seen — button on story overlay to selectively mark stories as seen (button or toggle mode) **\***
+- Long-press the story seen button for quick actions **\***
+- Per-user story seen-receipt exclusions — exclude specific users so their stories behave normally. Manage via 3-dot menu, eye button long-press, or settings list **\***
 - Stop story auto-advance — stories won't auto-skip when the timer ends **\***
 - Story download button — download directly from the story overlay **\***
 - Download disappearing DM media (photos + videos) **\***

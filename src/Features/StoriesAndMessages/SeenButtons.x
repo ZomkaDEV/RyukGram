@@ -117,7 +117,7 @@ static UIMenu *sciBuildThreadActionsMenu(UIView *anchor, NSString *threadId, UIW
         [items addObject:seenAction];
     }
 
-    NSString *toggleTitle = excluded ? @"Remove from exclusion" : @"Add to exclusion";
+    NSString *toggleTitle = excluded ? @"Un-exclude chat" : @"Exclude chat";
     UIImage *toggleImg = [UIImage systemImageNamed:excluded ? @"eye.fill" : @"eye.slash"];
     __weak UIView *weakAnchor = anchor;
     UIAction *toggle = [UIAction actionWithTitle:toggleTitle image:toggleImg identifier:nil
@@ -125,13 +125,17 @@ static UIMenu *sciBuildThreadActionsMenu(UIView *anchor, NSString *threadId, UIW
         if (!threadId) return;
         if (excluded) {
             [SCIExcludedThreads removeThreadId:threadId];
-            [SCIUtils showToastForDuration:2.0 title:@"Removed from exclusion"];
+            [SCIUtils showToastForDuration:2.0 title:@"Un-excluded"];
         } else {
             [SCIExcludedThreads addOrUpdateEntry:@{ @"threadId": threadId,
                                                     @"threadName": @"",
                                                     @"isGroup": @NO,
                                                     @"users": @[] }];
-            [SCIUtils showToastForDuration:2.0 title:@"Added to exclusion"];
+            [SCIUtils showToastForDuration:2.0 title:@"Excluded"];
+            // Immediately mark seen since exclusion means normal behavior.
+            UIViewController *nearestVC = [SCIUtils nearestViewControllerForView:weakAnchor];
+            if ([nearestVC isKindOfClass:%c(IGDirectThreadViewController)])
+                [(IGDirectThreadViewController *)nearestVC markLastMessageAsSeen];
         }
         sciRefreshNavBarItems(weakAnchor);
     }];

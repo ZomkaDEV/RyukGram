@@ -6,7 +6,15 @@
 
 BOOL sciSeenBypassActive = NO;
 BOOL sciAdvanceBypassActive = NO;
+BOOL sciStorySeenToggleEnabled = NO; // toggle-mode session bypass
 NSMutableSet *sciAllowedSeenPKs = nil;
+
+extern BOOL sciIsCurrentStoryOwnerExcluded(void);
+extern BOOL sciIsObjectStoryOwnerExcluded(id obj);
+
+static BOOL sciStorySeenToggleBypass(void) {
+    return [[SCIUtils getStringPref:@"story_seen_mode"] isEqualToString:@"toggle"] && sciStorySeenToggleEnabled;
+}
 
 void sciAllowSeenForPK(id media) {
     if (!media) return;
@@ -25,12 +33,26 @@ static BOOL sciIsPKAllowed(id media) {
 
 static BOOL sciShouldBlockSeenNetwork() {
     if (sciSeenBypassActive) return NO;
+    if (sciStorySeenToggleBypass()) return NO;
+    if (sciIsCurrentStoryOwnerExcluded()) return NO;
     return [SCIUtils getBoolPref:@"no_seen_receipt"];
 }
 
 static BOOL sciShouldBlockSeenVisual() {
     if (sciSeenBypassActive) return NO;
+    if (sciStorySeenToggleBypass()) return NO;
+    if (sciIsCurrentStoryOwnerExcluded()) return NO;
     return [SCIUtils getBoolPref:@"no_seen_receipt"] && [SCIUtils getBoolPref:@"no_seen_visual"];
+}
+
+// Per-instance gating for tray/item/ring hooks where the "current" story
+// VC may not be the owner of the model in question.
+static BOOL sciShouldBlockSeenVisualForObj(id obj) {
+    if (sciSeenBypassActive) return NO;
+    if (sciStorySeenToggleBypass()) return NO;
+    if (![SCIUtils getBoolPref:@"no_seen_receipt"] || ![SCIUtils getBoolPref:@"no_seen_visual"]) return NO;
+    if (sciIsObjectStoryOwnerExcluded(obj)) return NO;
+    return YES;
 }
 
 // network seen blocking
@@ -79,16 +101,16 @@ static BOOL sciShouldBlockSeenVisual() {
 %end
 
 %hook IGStoryTrayViewModel
-- (void)markAsSeen { if (sciShouldBlockSeenVisual()) return; %orig; }
-- (void)setHasUnseenMedia:(BOOL)arg1 { if (sciShouldBlockSeenVisual()) { %orig(YES); return; } %orig; }
-- (BOOL)hasUnseenMedia { if (sciShouldBlockSeenVisual()) return YES; return %orig; }
-- (void)setIsSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisual()) { %orig(NO); return; } %orig; }
-- (BOOL)isSeen { if (sciShouldBlockSeenVisual()) return NO; return %orig; }
+- (void)markAsSeen { if (sciShouldBlockSeenVisualForObj(self)) return; %orig; }
+- (void)setHasUnseenMedia:(BOOL)arg1 { if (sciShouldBlockSeenVisualForObj(self)) { %orig(YES); return; } %orig; }
+- (BOOL)hasUnseenMedia { if (sciShouldBlockSeenVisualForObj(self)) return YES; return %orig; }
+- (void)setIsSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisualForObj(self)) { %orig(NO); return; } %orig; }
+- (BOOL)isSeen { if (sciShouldBlockSeenVisualForObj(self)) return NO; return %orig; }
 %end
 
 %hook IGStoryItem
-- (void)setHasSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisual()) { %orig(NO); return; } %orig; }
-- (BOOL)hasSeen { if (sciShouldBlockSeenVisual()) return NO; return %orig; }
+- (void)setHasSeen:(BOOL)arg1 { if (sciShouldBlockSeenVisualForObj(self)) { %orig(NO); return; } %orig; }
+- (BOOL)hasSeen { if (sciShouldBlockSeenVisualForObj(self)) return NO; return %orig; }
 %end
 
 %hook IGStoryGradientRingView

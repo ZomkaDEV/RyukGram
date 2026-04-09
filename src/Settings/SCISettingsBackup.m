@@ -404,6 +404,7 @@ typedef NS_ENUM(NSInteger, SCIBackupPreviewRowKind) {
 + (NSArray<NSString *> *)extraDataKeys {
     return @[
         @"excluded_threads",
+        @"excluded_story_users",
     ];
 }
 

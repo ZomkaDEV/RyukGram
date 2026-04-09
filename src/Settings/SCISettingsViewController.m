@@ -81,6 +81,11 @@ static char rowStaticRef[] = "row";
     }
 }
 
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.tableView reloadData];
+}
+
 #pragma mark - Search
 
 - (BOOL)isSearching {
@@ -178,7 +183,7 @@ static char rowStaticRef[] = "row";
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     UIListContentConfiguration *cellContentConfig = cell.defaultContentConfiguration;
     
-    cellContentConfig.text = row.title;
+    cellContentConfig.text = row.dynamicTitle ? row.dynamicTitle() : row.title;
 
     // While searching, show the breadcrumb path instead of the row subtitle.
     NSString *displaySubtitle = [self isSearching] && searchBreadcrumb.length ? searchBreadcrumb : row.subtitle;

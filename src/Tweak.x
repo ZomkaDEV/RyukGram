@@ -61,7 +61,10 @@ BOOL dmVisualMsgsViewedButtonEnabled = false;
         @"warn_refresh_clears_preserved": @(NO),
         @"enable_chat_exclusions": @(YES),
         @"exclusions_default_keep_deleted": @(NO),
-        @"unexclude_inbox_button": @(YES)
+        @"unexclude_inbox_button": @(YES),
+        @"enable_story_user_exclusions": @(YES),
+        @"story_excluded_show_unexclude_eye": @(YES),
+        @"story_seen_mode": @"button"
     };
     [[NSUserDefaults standardUserDefaults] registerDefaults:sciDefaults];
     
@@ -611,7 +614,9 @@ shouldPersistLastBugReportId:(id)arg6
 
     }
 
-    return %orig([filteredObjs copy], edr, headerLabelText);
+    extern NSArray *sciMaybeAppendStoryExcludeMenuItem(NSArray *);
+    NSArray *finalObjs = sciMaybeAppendStoryExcludeMenuItem([filteredObjs copy]);
+    return %orig(finalObjs, edr, headerLabelText);
 }
 %end
 

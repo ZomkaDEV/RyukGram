@@ -6,14 +6,17 @@
 @property (nonatomic, strong) UISearchBar *searchBar;
 @property (nonatomic, copy)   NSArray<NSDictionary *> *filtered;
 @property (nonatomic, copy)   NSString *query;
-@property (nonatomic, assign) NSInteger sortMode; // 0=added desc, 1=name asc
+@property (nonatomic, assign) NSInteger sortMode;
+@property (nonatomic, strong) UIBarButtonItem *sortBtn;
+@property (nonatomic, strong) UIBarButtonItem *editBtn;
+@property (nonatomic, strong) UIToolbar *batchToolbar;
 @end
 
 @implementation SCIExcludedChatsViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Excluded chats";
+    self.title = @"Chats";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
 
     self.searchBar = [[UISearchBar alloc] init];
@@ -25,21 +28,87 @@
     self.tableView.dataSource = self;
     self.tableView.delegate = self;
     self.tableView.tableHeaderView = self.searchBar;
+    self.tableView.allowsMultipleSelectionDuringEditing = YES;
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.tableView];
+
+    self.batchToolbar = [[UIToolbar alloc] init];
+    self.batchToolbar.translatesAutoresizingMaskIntoConstraints = NO;
+    self.batchToolbar.hidden = YES;
+    [self.view addSubview:self.batchToolbar];
+
     [NSLayoutConstraint activateConstraints:@[
         [self.tableView.topAnchor      constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        [self.tableView.bottomAnchor   constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor],
         [self.tableView.leadingAnchor  constraintEqualToAnchor:self.view.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.tableView.bottomAnchor   constraintEqualToAnchor:self.batchToolbar.topAnchor],
+        [self.batchToolbar.leadingAnchor  constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.batchToolbar.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.batchToolbar.bottomAnchor   constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor],
     ]];
 
-    UIBarButtonItem *sortBtn = [[UIBarButtonItem alloc]
+    self.sortBtn = [[UIBarButtonItem alloc]
         initWithImage:[UIImage systemImageNamed:@"arrow.up.arrow.down"]
                 style:UIBarButtonItemStylePlain target:self action:@selector(toggleSort)];
-    self.navigationItem.rightBarButtonItem = sortBtn;
+    self.editBtn = [[UIBarButtonItem alloc]
+        initWithTitle:@"Select" style:UIBarButtonItemStylePlain target:self action:@selector(toggleEdit)];
+    self.navigationItem.rightBarButtonItems = @[self.editBtn, self.sortBtn];
 
     [self reload];
+}
+
+- (void)toggleEdit {
+    BOOL entering = !self.tableView.isEditing;
+    [self.tableView setEditing:entering animated:YES];
+    self.editBtn.title = entering ? @"Done" : @"Select";
+    self.editBtn.style = entering ? UIBarButtonItemStyleDone : UIBarButtonItemStylePlain;
+    self.batchToolbar.hidden = !entering;
+    if (entering) [self updateToolbar];
+}
+
+- (void)updateToolbar {
+    UIBarButtonItem *flex = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil];
+    UIBarButtonItem *del = [[UIBarButtonItem alloc] initWithTitle:@"Remove" style:UIBarButtonItemStylePlain target:self action:@selector(removeSelected)];
+    del.tintColor = [UIColor systemRedColor];
+    UIBarButtonItem *kd = [[UIBarButtonItem alloc] initWithTitle:@"Keep-deleted" style:UIBarButtonItemStylePlain target:self action:@selector(batchKeepDeleted)];
+    self.batchToolbar.items = @[del, flex, kd];
+}
+
+- (void)removeSelected {
+    NSArray<NSIndexPath *> *sel = self.tableView.indexPathsForSelectedRows;
+    if (!sel.count) return;
+    for (NSIndexPath *ip in sel) {
+        NSDictionary *e = self.filtered[ip.row];
+        [SCIExcludedThreads removeThreadId:e[@"threadId"]];
+    }
+    [self toggleEdit];
+    [self reload];
+}
+
+- (void)batchKeepDeleted {
+    NSArray<NSIndexPath *> *sel = self.tableView.indexPathsForSelectedRows;
+    if (!sel.count) return;
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Set keep-deleted override" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    void (^apply)(SCIKeepDeletedOverride) = ^(SCIKeepDeletedOverride mode) {
+        for (NSIndexPath *ip in sel) {
+            NSDictionary *e = self.filtered[ip.row];
+            [SCIExcludedThreads setKeepDeletedOverride:mode forThreadId:e[@"threadId"]];
+        }
+        [self toggleEdit];
+        [self reload];
+    };
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Follow default" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        apply(SCIKeepDeletedOverrideDefault);
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Force ON (preserve unsends)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        apply(SCIKeepDeletedOverrideIncluded);
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Force OFF (allow unsends)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        apply(SCIKeepDeletedOverrideExcluded);
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.barButtonItem = self.batchToolbar.items.lastObject;
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 - (void)toggleSort {
@@ -58,7 +127,7 @@
         [sheet addAction:a];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    sheet.popoverPresentationController.barButtonItem = self.navigationItem.rightBarButtonItem;
+    sheet.popoverPresentationController.barButtonItem = self.sortBtn;
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
@@ -77,17 +146,15 @@
     }
     if (self.sortMode == 0) {
         all = [all sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-            NSNumber *na = a[@"addedAt"] ?: @0, *nb = b[@"addedAt"] ?: @0;
-            return [nb compare:na];
+            return [b[@"addedAt"] ?: @0 compare:a[@"addedAt"] ?: @0];
         }];
     } else {
         all = [all sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-            NSString *na = a[@"threadName"] ?: @"", *nb = b[@"threadName"] ?: @"";
-            return [na caseInsensitiveCompare:nb];
+            return [a[@"threadName"] ?: @"" caseInsensitiveCompare:b[@"threadName"] ?: @""];
         }];
     }
     self.filtered = all;
-    self.title = [NSString stringWithFormat:@"Excluded chats (%lu)", (unsigned long)self.filtered.count];
+    self.title = [NSString stringWithFormat:@"Chats (%lu)", (unsigned long)self.filtered.count];
     [self.tableView reloadData];
 }
 
@@ -129,11 +196,12 @@
     cell.textLabel.text = [NSString stringWithFormat:@"%@%@", isGroup ? @"👥 " : @"", name];
     cell.detailTextLabel.text = subtitle;
     cell.detailTextLabel.numberOfLines = 2;
-    cell.accessoryType = isGroup ? UITableViewCellAccessoryNone : UITableViewCellAccessoryDisclosureIndicator;
+    cell.accessoryType = (isGroup || tv.isEditing) ? UITableViewCellAccessoryNone : UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }
 
 - (void)tableView:(UITableView *)tv didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (tv.isEditing) return;
     [tv deselectRowAtIndexPath:indexPath animated:YES];
     NSDictionary *e = self.filtered[indexPath.row];
     NSArray *users = e[@"users"];
@@ -141,9 +209,8 @@
     NSString *username = users.firstObject[@"username"];
     if (!username) return;
     NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"instagram://user?username=%@", username]];
-    if ([[UIApplication sharedApplication] canOpenURL:url]) {
+    if ([[UIApplication sharedApplication] canOpenURL:url])
         [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-    }
 }
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tv trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {

@@ -41,6 +41,8 @@ typedef NS_ENUM(NSInteger, SCITableCell) {
 
 @property (nonatomic, strong) UIMenu *baseMenu;
 
+@property (nonatomic, copy, nullable) NSString *(^dynamicTitle)(void);
+
 @property (nonatomic, strong) NSArray *navSections;
 @property (nonatomic, strong) UIViewController *navViewController;
 

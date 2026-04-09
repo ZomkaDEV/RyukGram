@@ -73,8 +73,7 @@ static id new_ctxMenuCfg(id self, SEL _cmd, id indexPath) {
     UIContextMenuActionProvider wrapped = ^UIMenu *(NSArray<UIMenuElement *> *suggested) {
         UIMenu *base = origProvider ? origProvider(suggested) : [UIMenu menuWithChildren:suggested];
         BOOL excluded = [SCIExcludedThreads isThreadIdExcluded:tid];
-        NSString *title = excluded ? @"Remove from read-receipt exclusion"
-                                   : @"Add to read-receipt exclusion";
+        NSString *title = excluded ? @"Un-exclude chat" : @"Exclude chat";
         UIImage *img = [UIImage systemImageNamed:excluded ? @"eye.fill" : @"eye.slash"];
         UIAction *toggle = [UIAction actionWithTitle:title image:img identifier:nil
                                              handler:^(__kindof UIAction *_) {

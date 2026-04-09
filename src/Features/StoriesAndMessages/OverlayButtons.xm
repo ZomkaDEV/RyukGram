@@ -1,11 +1,19 @@
 // Download + mark seen buttons on story/DM visual message overlay
 #import "StoryHelpers.h"
 #import "SCIExcludedThreads.h"
+#import "SCIExcludedStoryUsers.h"
 
 extern "C" BOOL sciSeenBypassActive;
 extern "C" BOOL sciAdvanceBypassActive;
 extern "C" NSMutableSet *sciAllowedSeenPKs;
 extern "C" void sciAllowSeenForPK(id);
+extern "C" BOOL sciIsCurrentStoryOwnerExcluded(void);
+extern "C" NSDictionary *sciCurrentStoryOwnerInfo(void);
+extern "C" NSDictionary *sciOwnerInfoForView(UIView *view);
+extern "C" BOOL sciStorySeenToggleEnabled;
+extern "C" void sciRefreshAllVisibleOverlays(UIViewController *storyVC);
+extern "C" void sciTriggerStoryMarkSeen(UIViewController *storyVC);
+extern "C" __weak UIViewController *sciActiveStoryViewerVC;
 
 static SCIDownloadDelegate *sciStoryVideoDl = nil;
 static SCIDownloadDelegate *sciStoryImageDl = nil;
@@ -41,7 +49,6 @@ static void sciDownloadWithConfirm(void(^block)(void)) {
     }
 }
 
-// get media from DM visual message VC
 static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
     Ivar dsIvar = class_getInstanceVariable([dmVC class], "_dataSource");
     id ds = dsIvar ? object_getIvar(dmVC, dsIvar) : nil;
@@ -50,7 +57,6 @@ static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
     id msg = msgIvar ? object_getIvar(ds, msgIvar) : nil;
     if (!msg) return;
 
-    // video
     id rawVideo = sciCall(msg, @selector(rawVideo));
     if (rawVideo) {
         NSURL *url = [SCIUtils getVideoUrl:rawVideo];
@@ -61,7 +67,6 @@ static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
         }
     }
 
-    // photo via rawPhoto
     id rawPhoto = sciCall(msg, @selector(rawPhoto));
     if (rawPhoto) {
         NSURL *url = [SCIUtils getPhotoUrl:rawPhoto];
@@ -72,7 +77,6 @@ static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
         }
     }
 
-    // photo via imageSpecifier
     id imgSpec = sciCall(msg, NSSelectorFromString(@"imageSpecifier"));
     if (imgSpec) {
         NSURL *url = sciCall(imgSpec, @selector(url));
@@ -83,7 +87,6 @@ static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
         }
     }
 
-    // photo via _visualMediaInfo._media
     Ivar vmiIvar = class_getInstanceVariable([msg class], "_visualMediaInfo");
     id vmi = vmiIvar ? object_getIvar(msg, vmiIvar) : nil;
     if (vmi) {
@@ -100,11 +103,14 @@ static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
 }
 
 %hook IGStoryFullscreenOverlayView
+
+// ============ Button injection ============
+
 - (void)didMoveToSuperview {
     %orig;
     if (!self.superview) return;
 
-    // download button
+    // Download button
     if ([SCIUtils getBoolPref:@"dw_story"] && ![self viewWithTag:1340]) {
         UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
         btn.tag = 1340;
@@ -125,50 +131,111 @@ static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
         ]];
     }
 
-    // mark seen button (stories: mark as seen, DMs: mark as viewed + dismiss)
-    // Skip for DM visual messages inside an excluded thread — the button
-    // would be a no-op there since we don't block visual seen anyway.
-    if ([SCIUtils getBoolPref:@"no_seen_receipt"] && ![self viewWithTag:1339]
-        && ![SCIExcludedThreads isActiveThreadExcluded]) {
-        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-        btn.tag = 1339;
-        UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightSemibold];
-        [btn setImage:[UIImage systemImageNamed:@"eye" withConfiguration:cfg] forState:UIControlStateNormal];
-        btn.tintColor = [UIColor whiteColor];
-        btn.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.4];
-        btn.layer.cornerRadius = 18;
-        btn.clipsToBounds = YES;
-        btn.translatesAutoresizingMaskIntoConstraints = NO;
-        [btn addTarget:self action:@selector(sciMarkSeenTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [self addSubview:btn];
-        UIView *dlBtn = [self viewWithTag:1340];
-        if (dlBtn) {
-            [NSLayoutConstraint activateConstraints:@[
-                [btn.centerYAnchor constraintEqualToAnchor:dlBtn.centerYAnchor],
-                [btn.trailingAnchor constraintEqualToAnchor:dlBtn.leadingAnchor constant:-10],
-                [btn.widthAnchor constraintEqualToConstant:36],
-                [btn.heightAnchor constraintEqualToConstant:36]
-            ]];
-        } else {
-            [NSLayoutConstraint activateConstraints:@[
-                [btn.bottomAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.bottomAnchor constant:-100],
-                [btn.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-12],
-                [btn.widthAnchor constraintEqualToConstant:36],
-                [btn.heightAnchor constraintEqualToConstant:36]
-            ]];
-        }
+    // Seen button — deferred so the responder chain is wired up
+    __weak UIView *weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIView *s = weakSelf;
+        if (s && s.superview) ((void(*)(id, SEL))objc_msgSend)(s, @selector(sciRefreshSeenButton));
+    });
+}
+
+// ============ Seen button lifecycle ============
+
+// Rebuilds the eye button (tag 1339) based on current owner + prefs. Idempotent.
+%new - (void)sciRefreshSeenButton {
+    if (![SCIUtils getBoolPref:@"no_seen_receipt"]) return;
+    if ([SCIExcludedThreads isActiveThreadExcluded]) return;
+
+    NSDictionary *ownerInfo = sciOwnerInfoForView(self);
+    NSString *ownerPK = ownerInfo[@"pk"] ?: @"";
+    BOOL ownerExcluded = ownerInfo && [SCIExcludedStoryUsers isUserPKExcluded:ownerPK];
+    BOOL hideForExcludedOwner = ownerExcluded && ![SCIUtils getBoolPref:@"story_excluded_show_unexclude_eye"];
+    BOOL toggleMode = [[SCIUtils getStringPref:@"story_seen_mode"] isEqualToString:@"toggle"];
+
+    NSString *symName;
+    UIColor *tint;
+    if (ownerExcluded) {
+        symName = @"eye.slash.fill"; tint = SCIUtils.SCIColor_Primary;
+    } else if (toggleMode) {
+        symName = sciStorySeenToggleEnabled ? @"eye.fill" : @"eye";
+        tint = sciStorySeenToggleEnabled ? SCIUtils.SCIColor_Primary : [UIColor whiteColor];
+    } else {
+        symName = @"eye"; tint = [UIColor whiteColor];
+    }
+
+    UIButton *existing = (UIButton *)[self viewWithTag:1339];
+
+    if (hideForExcludedOwner) {
+        [existing removeFromSuperview];
+        return;
+    }
+
+    UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightSemibold];
+
+    if (existing) {
+        [existing setImage:[UIImage systemImageNamed:symName withConfiguration:cfg] forState:UIControlStateNormal];
+        existing.tintColor = tint;
+        return;
+    }
+
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+    btn.tag = 1339;
+    [btn setImage:[UIImage systemImageNamed:symName withConfiguration:cfg] forState:UIControlStateNormal];
+    btn.tintColor = tint;
+    btn.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.4];
+    btn.layer.cornerRadius = 18;
+    btn.clipsToBounds = YES;
+    btn.translatesAutoresizingMaskIntoConstraints = NO;
+    [btn addTarget:self action:@selector(sciSeenButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+    UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc]
+        initWithTarget:self action:@selector(sciSeenButtonLongPressed:)];
+    lp.minimumPressDuration = 0.4;
+    [btn addGestureRecognizer:lp];
+    [self addSubview:btn];
+    UIView *dlBtn = [self viewWithTag:1340];
+    if (dlBtn) {
+        [NSLayoutConstraint activateConstraints:@[
+            [btn.centerYAnchor constraintEqualToAnchor:dlBtn.centerYAnchor],
+            [btn.trailingAnchor constraintEqualToAnchor:dlBtn.leadingAnchor constant:-10],
+            [btn.widthAnchor constraintEqualToConstant:36],
+            [btn.heightAnchor constraintEqualToConstant:36]
+        ]];
+    } else {
+        [NSLayoutConstraint activateConstraints:@[
+            [btn.bottomAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.bottomAnchor constant:-100],
+            [btn.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-12],
+            [btn.widthAnchor constraintEqualToConstant:36],
+            [btn.heightAnchor constraintEqualToConstant:36]
+        ]];
     }
 }
 
+// Refresh when story owner changes (overlay reuse across reels)
+- (void)layoutSubviews {
+    %orig;
+    if (![SCIUtils getBoolPref:@"no_seen_receipt"]) return;
+    static char kLastPKKey;
+    static char kLastExclKey;
+    NSDictionary *info = sciOwnerInfoForView(self);
+    NSString *pk = info[@"pk"] ?: @"";
+    BOOL excluded = pk.length && [SCIExcludedStoryUsers isUserPKExcluded:pk];
+    NSString *prev = objc_getAssociatedObject(self, &kLastPKKey);
+    NSNumber *prevExcl = objc_getAssociatedObject(self, &kLastExclKey);
+    BOOL changed = ![pk isEqualToString:prev ?: @""] || (prevExcl && [prevExcl boolValue] != excluded);
+    if (!changed) return;
+    objc_setAssociatedObject(self, &kLastPKKey, pk, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    objc_setAssociatedObject(self, &kLastExclKey, @(excluded), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    ((void(*)(id, SEL))objc_msgSend)(self, @selector(sciRefreshSeenButton));
+}
 
-// download handler — works for both stories and DM visual messages
+// ============ Download handler ============
+
 %new - (void)sciDownloadTapped:(UIButton *)sender {
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [haptic impactOccurred];
     [UIView animateWithDuration:0.1 animations:^{ sender.transform = CGAffineTransformMakeScale(0.8, 0.8); }
                      completion:^(BOOL f) { [UIView animateWithDuration:0.1 animations:^{ sender.transform = CGAffineTransformIdentity; }]; }];
     @try {
-        // story path
         id item = sciGetCurrentStoryItem(self);
         IGMedia *media = sciExtractMediaFromItem(item);
         if (media) {
@@ -176,7 +243,6 @@ static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
             return;
         }
 
-        // DM visual message path
         UIViewController *dmVC = sciFindVC(self, @"IGDirectVisualMessageViewerController");
         if (dmVC) {
             sciDownloadDMVisualMessage(dmVC);
@@ -189,18 +255,101 @@ static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
     }
 }
 
-// mark seen handler — stories: allow-list approach, DMs: trigger viewed + dismiss
+// ============ Seen button tap ============
+
+%new - (void)sciSeenButtonTapped:(UIButton *)sender {
+    NSDictionary *ownerInfo = sciOwnerInfoForView(self);
+    BOOL excluded = ownerInfo && [SCIExcludedStoryUsers isUserPKExcluded:ownerInfo[@"pk"]];
+
+    // Excluded owner: tap to un-exclude
+    if (excluded) {
+        UIViewController *host = [SCIUtils nearestViewControllerForView:self];
+        UIAlertController *alert = [UIAlertController
+            alertControllerWithTitle:@"Un-exclude story seen?"
+                             message:[NSString stringWithFormat:@"@%@ will resume normal story-seen blocking.", ownerInfo[@"username"] ?: @""]
+                      preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Un-exclude" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+            [SCIExcludedStoryUsers removePK:ownerInfo[@"pk"]];
+            [SCIUtils showToastForDuration:2.0 title:@"Un-excluded"];
+            sciRefreshAllVisibleOverlays(sciActiveStoryViewerVC);
+        }]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [host presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    // Toggle mode
+    if ([[SCIUtils getStringPref:@"story_seen_mode"] isEqualToString:@"toggle"]) {
+        sciStorySeenToggleEnabled = !sciStorySeenToggleEnabled;
+        UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:18 weight:UIImageSymbolWeightSemibold];
+        [sender setImage:[UIImage systemImageNamed:(sciStorySeenToggleEnabled ? @"eye.fill" : @"eye") withConfiguration:cfg] forState:UIControlStateNormal];
+        sender.tintColor = sciStorySeenToggleEnabled ? SCIUtils.SCIColor_Primary : [UIColor whiteColor];
+        [SCIUtils showToastForDuration:2.0 title:sciStorySeenToggleEnabled ? @"Story read receipts enabled" : @"Story read receipts disabled"];
+        return;
+    }
+
+    // Button mode: mark seen once
+    ((void(*)(id, SEL, id))objc_msgSend)(self, @selector(sciMarkSeenTapped:), sender);
+}
+
+// ============ Seen button long-press menu ============
+
+%new - (void)sciSeenButtonLongPressed:(UILongPressGestureRecognizer *)gr {
+    if (gr.state != UIGestureRecognizerStateBegan) return;
+    UIView *btn = gr.view;
+    UIViewController *host = [SCIUtils nearestViewControllerForView:self];
+    if (!host) return;
+    UIWindow *capturedWin = btn.window ?: self.window;
+    if (!capturedWin) {
+        for (UIWindow *w in [UIApplication sharedApplication].windows) { if (w.isKeyWindow) { capturedWin = w; break; } }
+    }
+    NSDictionary *ownerInfo = sciOwnerInfoForView(self);
+    NSString *pk = ownerInfo[@"pk"];
+    NSString *username = ownerInfo[@"username"] ?: @"";
+    NSString *fullName = ownerInfo[@"fullName"] ?: @"";
+    BOOL excluded = pk && [SCIExcludedStoryUsers isUserPKExcluded:pk];
+
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:nil message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Mark seen" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        ((void(*)(id, SEL, id))objc_msgSend)(self, @selector(sciMarkSeenTapped:), btn);
+    }]];
+    if (pk) {
+        NSString *t = excluded ? @"Un-exclude story seen" : @"Exclude story seen";
+        [sheet addAction:[UIAlertAction actionWithTitle:t style:excluded ? UIAlertActionStyleDestructive : UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+            if (excluded) {
+                [SCIExcludedStoryUsers removePK:pk];
+                [SCIUtils showToastForDuration:2.0 title:@"Un-excluded"];
+            } else {
+                [SCIExcludedStoryUsers addOrUpdateEntry:@{ @"pk": pk, @"username": username, @"fullName": fullName }];
+                [SCIUtils showToastForDuration:2.0 title:@"Excluded"];
+                sciTriggerStoryMarkSeen(sciActiveStoryViewerVC);
+            }
+            sciRefreshAllVisibleOverlays(sciActiveStoryViewerVC);
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Stories settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction *_) {
+        [SCIUtils showSettingsVC:capturedWin atTopLevelEntry:@"Stories"];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView = btn;
+    sheet.popoverPresentationController.sourceRect = btn.bounds;
+    [host presentViewController:sheet animated:YES completion:nil];
+}
+
+// ============ Mark seen handler ============
+
 %new - (void)sciMarkSeenTapped:(UIButton *)sender {
     UIImpactFeedbackGenerator *haptic = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [haptic impactOccurred];
-    [UIView animateWithDuration:0.1 animations:^{ sender.transform = CGAffineTransformMakeScale(0.8, 0.8); sender.alpha = 0.6; }
-                     completion:^(BOOL f) { [UIView animateWithDuration:0.15 animations:^{ sender.transform = CGAffineTransformIdentity; sender.alpha = 1.0; }]; }];
+    if (sender) {
+        [UIView animateWithDuration:0.1 animations:^{ sender.transform = CGAffineTransformMakeScale(0.8, 0.8); sender.alpha = 0.6; }
+                         completion:^(BOOL f) { [UIView animateWithDuration:0.15 animations:^{ sender.transform = CGAffineTransformIdentity; sender.alpha = 1.0; }]; }];
+    }
 
     @try {
-        // story path
+        // Story path
         UIViewController *storyVC = sciFindVC(self, @"IGStoryViewerViewController");
         if (storyVC) {
-            // allow-list the current media PK for deferred upload
             id sectionCtrl = sciFindSectionController(storyVC);
             id storyItem = sectionCtrl ? sciCall(sectionCtrl, NSSelectorFromString(@"currentStoryItem")) : nil;
             if (!storyItem) storyItem = sciGetCurrentStoryItem(self);
@@ -238,28 +387,24 @@ static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
             sciSeenBypassActive = NO;
             [SCIUtils showToastForDuration:2.0 title:@"Marked as seen" subtitle:@"Will sync when leaving stories"];
 
-            // Advance to next story item if enabled — bypass the stop-auto-advance hook
-            if ([SCIUtils getBoolPref:@"advance_on_mark_seen"] && sectionCtrl) {
+            // Advance to next story if enabled (skip when triggered programmatically via exclude)
+            if (sender && [SCIUtils getBoolPref:@"advance_on_mark_seen"] && sectionCtrl) {
                 __block id secCtrl = sectionCtrl;
                 __weak __typeof(self) weakSelf = self;
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     sciAdvanceBypassActive = YES;
-
                     SEL advSel = NSSelectorFromString(@"advanceToNextItemWithNavigationAction:");
-                    if ([secCtrl respondsToSelector:advSel]) {
+                    if ([secCtrl respondsToSelector:advSel])
                         ((void(*)(id, SEL, NSInteger))objc_msgSend)(secCtrl, advSel, 1);
-                    }
 
-                    // After advancing, kick playback on the new section controller
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         __strong __typeof(weakSelf) strongSelf = weakSelf;
                         UIViewController *vc2 = strongSelf ? sciFindVC(strongSelf, @"IGStoryViewerViewController") : nil;
                         id sc2 = vc2 ? sciFindSectionController(vc2) : nil;
                         if (sc2) {
                             SEL resumeSel = NSSelectorFromString(@"tryResumePlaybackWithReason:");
-                            if ([sc2 respondsToSelector:resumeSel]) {
+                            if ([sc2 respondsToSelector:resumeSel])
                                 ((void(*)(id, SEL, NSInteger))objc_msgSend)(sc2, resumeSel, 0);
-                            }
                         }
                         sciAdvanceBypassActive = NO;
                     });
@@ -317,9 +462,8 @@ static void sciDownloadDMVisualMessage(UIViewController *dmVC) {
 
 %end
 
-// Mirror IG's chrome alpha onto our injected seen + download buttons so they
-// fade in sync during hold/zoom. Walks up from a fading sibling to find the
-// IGStoryFullscreenOverlayView and updates its tagged subviews.
+// ============ Chrome alpha sync ============
+
 static void sciSyncStoryButtonsAlpha(UIView *self_, CGFloat alpha) {
     Class overlayCls = NSClassFromString(@"IGStoryFullscreenOverlayView");
     if (!overlayCls) return;

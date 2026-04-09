@@ -2,6 +2,8 @@
 #import "SCISettingsBackup.h"
 #import "SCIExcludedChatsViewController.h"
 #import "../Features/StoriesAndMessages/SCIExcludedThreads.h"
+#import "../Features/StoriesAndMessages/SCIExcludedStoryUsers.h"
+#import "SCIExcludedStoryUsersViewController.h"
 
 @implementation SCITweakSettings
 
@@ -147,6 +149,7 @@
                                                 [SCISetting switchCellWithTitle:@"Disable story seen receipt" subtitle:@"Hides the notification for others when you view their story" defaultsKey:@"no_seen_receipt"],
                                                 [SCISetting switchCellWithTitle:@"Keep stories visually unseen" subtitle:@"Prevents stories from visually marking as seen in the tray (keeps colorful ring)" defaultsKey:@"no_seen_visual"],
                                                 [SCISetting switchCellWithTitle:@"Mark seen on story like" subtitle:@"Marks a story as seen the moment you tap the heart, even with seen blocking on" defaultsKey:@"seen_on_story_like"],
+                                                [SCISetting menuCellWithTitle:@"Manual seen button mode" subtitle:@"Button = single-tap mark seen. Toggle = tap toggles story read receipts on/off (eye fills blue when on)" menu:[self menus][@"story_seen_mode"]],
                                             ]
                                         },
                                         @{
@@ -154,6 +157,34 @@
                                             @"rows": @[
                                                 [SCISetting switchCellWithTitle:@"Stop story auto-advance" subtitle:@"Stories won't auto-skip to the next one when the timer ends. Tap to advance manually" defaultsKey:@"stop_story_auto_advance"],
                                                 [SCISetting switchCellWithTitle:@"Advance when marking as seen" subtitle:@"Tapping the eye button to mark a story as seen advances to the next story automatically" defaultsKey:@"advance_on_mark_seen"],
+                                            ]
+                                        },
+                                        @{
+                                            @"header": @"Excluded users",
+                                            @"footer": @"Excluded users' stories behave normally — your view shows up in their viewer list. Add via the long-press menu on the eye button while viewing a story, or via the 3-dot menu on the story header.",
+                                            @"rows": @[
+                                                [SCISetting switchCellWithTitle:@"Enable story user exclusions" subtitle:@"Master toggle. When off, exclusions are ignored" defaultsKey:@"enable_story_user_exclusions"],
+                                                [SCISetting switchCellWithTitle:@"Show un-exclude eye on excluded users" subtitle:@"When viewing an excluded user's story, the eye button appears so you can un-exclude with one tap. Off = use the 3-dot menu only" defaultsKey:@"story_excluded_show_unexclude_eye"],
+                                                ({
+                                                    SCISetting *s = [SCISetting buttonCellWithTitle:@"Manage list"
+                                                                       subtitle:@"Search, sort, swipe to remove"
+                                                                           icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
+                                                                         action:^(void) {
+                                                        UIWindow *win = nil;
+                                                        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                                                            if (w.isKeyWindow) { win = w; break; }
+                                                        }
+                                                        UIViewController *top = win.rootViewController;
+                                                        while (top.presentedViewController) top = top.presentedViewController;
+                                                        if ([top isKindOfClass:[UINavigationController class]]) {
+                                                            [(UINavigationController *)top pushViewController:[SCIExcludedStoryUsersViewController new] animated:YES];
+                                                        } else if (top.navigationController) {
+                                                            [top.navigationController pushViewController:[SCIExcludedStoryUsersViewController new] animated:YES];
+                                                        }
+                                                    }];
+                                                    s.dynamicTitle = ^{ return [NSString stringWithFormat:@"Manage list (%lu)", (unsigned long)[SCIExcludedStoryUsers count]]; };
+                                                    s;
+                                                }),
                                             ]
                                         },
                                         @{
@@ -207,22 +238,26 @@
                                             @"rows": @[
                                                 [SCISetting switchCellWithTitle:@"Enable chat exclusions" subtitle:@"Master toggle. When off, the inbox menu item disappears and exclusions are ignored" defaultsKey:@"enable_chat_exclusions"],
                                                 [SCISetting switchCellWithTitle:@"Default: also exclude keep-deleted" subtitle:@"Excluded chats also bypass keep-deleted-messages by default. Each chat can override this in the list" defaultsKey:@"exclusions_default_keep_deleted"],
-                                                [SCISetting buttonCellWithTitle:[NSString stringWithFormat:@"Manage list (%lu)", (unsigned long)[SCIExcludedThreads count]]
+                                                ({
+                                                    SCISetting *s = [SCISetting buttonCellWithTitle:@"Manage list"
                                                                        subtitle:@"Search, sort, swipe to remove or toggle keep-deleted"
                                                                            icon:[SCISymbol symbolWithName:@"list.bullet.rectangle"]
                                                                          action:^(void) {
-                                                    UIWindow *win = nil;
-                                                    for (UIWindow *w in [UIApplication sharedApplication].windows) {
-                                                        if (w.isKeyWindow) { win = w; break; }
-                                                    }
-                                                    UIViewController *top = win.rootViewController;
-                                                    while (top.presentedViewController) top = top.presentedViewController;
-                                                    if ([top isKindOfClass:[UINavigationController class]]) {
-                                                        [(UINavigationController *)top pushViewController:[SCIExcludedChatsViewController new] animated:YES];
-                                                    } else if (top.navigationController) {
-                                                        [top.navigationController pushViewController:[SCIExcludedChatsViewController new] animated:YES];
-                                                    }
-                                                }],
+                                                        UIWindow *win = nil;
+                                                        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                                                            if (w.isKeyWindow) { win = w; break; }
+                                                        }
+                                                        UIViewController *top = win.rootViewController;
+                                                        while (top.presentedViewController) top = top.presentedViewController;
+                                                        if ([top isKindOfClass:[UINavigationController class]]) {
+                                                            [(UINavigationController *)top pushViewController:[SCIExcludedChatsViewController new] animated:YES];
+                                                        } else if (top.navigationController) {
+                                                            [top.navigationController pushViewController:[SCIExcludedChatsViewController new] animated:YES];
+                                                        }
+                                                    }];
+                                                    s.dynamicTitle = ^{ return [NSString stringWithFormat:@"Manage list (%lu)", (unsigned long)[SCIExcludedThreads count]]; };
+                                                    s;
+                                                }),
                                             ]
                                         },
                                         @{
@@ -428,6 +463,25 @@
 
 + (NSDictionary *)menus {
     return @{
+        @"story_seen_mode": [UIMenu menuWithChildren:@[
+            [UICommand commandWithTitle:@"Button"
+                                    image:nil
+                                    action:@selector(menuChanged:)
+                            propertyList:@{
+                                @"defaultsKey": @"story_seen_mode",
+                                @"value": @"button"
+                            }
+            ],
+            [UICommand commandWithTitle:@"Toggle"
+                                    image:nil
+                                    action:@selector(menuChanged:)
+                            propertyList:@{
+                                @"defaultsKey": @"story_seen_mode",
+                                @"value": @"toggle"
+                            }
+            ]
+        ]],
+
         @"seen_mode": [UIMenu menuWithChildren:@[
             [UICommand commandWithTitle:@"Button"
                                     image:nil
