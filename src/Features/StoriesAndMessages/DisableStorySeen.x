@@ -119,12 +119,9 @@ static BOOL sciShouldBlockSeenVisualForObj(id obj) {
 - (void)updateRingForSeenState:(BOOL)arg1 { if (sciShouldBlockSeenVisual()) { %orig(NO); return; } %orig; }
 %end
 
-// ============ MARK SEEN ON STORY LIKE ============
-// Story likes are dispatched through several classes — IGSundialViewerControlsOverlayController,
-// IGStoryLikesInteractionControllingImpl, and IGSundialLikeButton. Hook every
-// known entry so any UI path (heart button, future double-tap, etc.) is caught.
-// On a like, we defer to the manual seen-button handler in OverlayButtons.xm
-// (sciMarkSeenTapped:) which is the only flow IG actually treats as a real seen.
+// ============ STORY LIKE HOOKS ============
+// Hooks all known like entry points to trigger mark-seen and auto-advance on like.
+// Uses sciMarkSeenTapped: from OverlayButtons.xm for the actual seen flow.
 
 static __weak UIViewController *sciActiveStoryVC = nil;
 
@@ -158,33 +155,72 @@ static void sciMarkActiveStorySeen(void) {
     UIView *overlay = sciFindStoryOverlayView(sciActiveStoryVC);
     if (!overlay) return;
     SEL sel = NSSelectorFromString(@"sciMarkSeenTapped:");
-    if ([overlay respondsToSelector:sel]) {
+    if ([overlay respondsToSelector:sel])
         ((void(*)(id, SEL, id))objc_msgSend)(overlay, sel, nil);
-    }
+}
+
+// Dedup guard — multiple hooks fire for the same like event
+static uint64_t sciLastLikeAdvanceTime = 0;
+
+static void sciAdvanceOnStoryLike(void) {
+    if (![SCIUtils getBoolPref:@"advance_on_story_like"]) return;
+    UIViewController *storyVC = sciActiveStoryVC;
+    if (!storyVC) return;
+    id sectionCtrl = sciFindSectionController(storyVC);
+    if (!sectionCtrl) return;
+
+    uint64_t now = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
+    if (now - sciLastLikeAdvanceTime < 500000000ULL) return;
+    sciLastLikeAdvanceTime = now;
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        sciAdvanceBypassActive = YES;
+        SEL advSel = NSSelectorFromString(@"advanceToNextItemWithNavigationAction:");
+        if ([sectionCtrl respondsToSelector:advSel])
+            ((void(*)(id, SEL, NSInteger))objc_msgSend)(sectionCtrl, advSel, 1);
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            id sc2 = storyVC ? sciFindSectionController(storyVC) : nil;
+            if (sc2) {
+                SEL resumeSel = NSSelectorFromString(@"tryResumePlaybackWithReason:");
+                if ([sc2 respondsToSelector:resumeSel])
+                    ((void(*)(id, SEL, NSInteger))objc_msgSend)(sc2, resumeSel, 0);
+            }
+            sciAdvanceBypassActive = NO;
+        });
+    });
+}
+
+static void sciOnStoryLike(void) {
+    sciMarkActiveStorySeen();
+    sciAdvanceOnStoryLike();
 }
 
 static void (*orig_didLikeSundial)(id, SEL, id);
 static void new_didLikeSundial(id self, SEL _cmd, id pk) {
     orig_didLikeSundial(self, _cmd, pk);
-    sciMarkActiveStorySeen();
+    sciOnStoryLike();
 }
 
 static void (*orig_overlaySetIsLiked)(id, SEL, BOOL, BOOL);
 static void new_overlaySetIsLiked(id self, SEL _cmd, BOOL isLiked, BOOL animated) {
     orig_overlaySetIsLiked(self, _cmd, isLiked, animated);
-    if (isLiked) sciMarkActiveStorySeen();
+    if (isLiked) sciOnStoryLike();
 }
 
+// IGUFIButton selected state: YES = heart filled (liked), NO = empty (not liked).
+// handleStoryLikeTapWithButton: is a toggle — check state before orig to determine direction.
 static void (*orig_handleLikeTap)(id, SEL, id);
 static void new_handleLikeTap(id self, SEL _cmd, id button) {
+    BOOL isLike = [button isKindOfClass:[UIButton class]] && [(UIButton *)button isSelected];
     orig_handleLikeTap(self, _cmd, button);
-    sciMarkActiveStorySeen();
+    if (isLike) sciOnStoryLike();
 }
 
 static void (*orig_likeButtonSetIsLiked)(id, SEL, BOOL, BOOL);
 static void new_likeButtonSetIsLiked(id self, SEL _cmd, BOOL isLiked, BOOL animated) {
     orig_likeButtonSetIsLiked(self, _cmd, isLiked, animated);
-    if (isLiked) sciMarkActiveStorySeen();
+    if (isLiked) sciOnStoryLike();
 }
 
 %ctor {
@@ -212,5 +248,4 @@ static void new_likeButtonSetIsLiked(id self, SEL _cmd, BOOL isLiked, BOOL anima
         if (class_getInstanceMethod(likeBtn, setLiked))
             MSHookMessageEx(likeBtn, setLiked, (IMP)new_likeButtonSetIsLiked, (IMP *)&orig_likeButtonSetIsLiked);
     }
-
 }

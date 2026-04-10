@@ -57,6 +57,7 @@ BOOL dmVisualMsgsViewedButtonEnabled = false;
         @"seen_auto_on_typing": @(NO),
         @"seen_on_story_like": @(NO),
         @"advance_on_mark_seen": @(NO),
+        @"advance_on_story_like": @(NO),
         @"indicate_unsent_messages": @(NO),
         @"unsent_message_toast": @(NO),
         @"warn_refresh_clears_preserved": @(NO),

@@ -205,6 +205,7 @@
                                             @"rows": @[
                                                 [SCISetting switchCellWithTitle:@"Stop story auto-advance" subtitle:@"Stories won't auto-skip to the next one when the timer ends. Tap to advance manually" defaultsKey:@"stop_story_auto_advance"],
                                                 [SCISetting switchCellWithTitle:@"Advance when marking as seen" subtitle:@"Tapping the eye button to mark a story as seen advances to the next story automatically" defaultsKey:@"advance_on_mark_seen"],
+                                                [SCISetting switchCellWithTitle:@"Advance on story like" subtitle:@"Liking a story automatically advances to the next one after a short delay" defaultsKey:@"advance_on_story_like"],
                                             ]
                                         },
                                         @{

@@ -97,6 +97,7 @@ A feature-rich iOS tweak for Instagram, forked from [SCInsta](https://github.com
 - Auto mark seen on typing (marks messages as read the moment you start typing, even when typing status is hidden) **\***
 - Mark seen on story like **\***
 - Advance to next story when marking as seen — tapping the eye button auto-skips to the next story **\***
+- Advance on story like — liking a story auto-skips to the next one **\***
 - Per-chat read-receipt exclusions — long-press any DM chat to exclude it from all read-receipt features. Excluded chats behave like a vanilla install (manual seen button, auto seen on send/typing, visual message blocking, view-once override are all skipped). Settings page lists excluded chats with search, sort, swipe-to-remove, and a per-entry override to also bypass keep-deleted-messages **\***
 - Send audio as file — send audio files as voice messages from the DM plus menu **\***
 - Download voice messages — adds a Download option to the long-press menu on voice messages, saves as M4A via share sheet **\***
